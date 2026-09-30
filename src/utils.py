@@ -13,13 +13,17 @@ from pyfaidx import Fasta  # type: ignore[import-untyped]
 REPO_ROOT = Path(__file__).parent.parent
 MODEL_DIR = REPO_ROOT / 'src' / 'trained_models'
 
-def hg38tohg19(vcf:pd.DataFrame, fasta:Fasta) -> pd.DataFrame:
+def hg38tohg19(vcf:pd.DataFrame, fasta:Fasta, prefix:bool) -> pd.DataFrame:
 
     """
     Convert hg38 coordinates to hg19
     """
 
-    converter = ChainFile(REPO_ROOT / 'requirements/hg38ToHg19.over.chain.gz', one_based=True)
+    if prefix:
+        converter = ChainFile(REPO_ROOT / 'requirements/hg38ToHg19.over.chain.gz', one_based=True)
+    else:
+        converter = ChainFile(REPO_ROOT / 'requirements/hg38ToHg19_nochr.over.chain.gz', one_based=True)
+
     for i, row in vcf.iterrows():
         chrom: str = str(row['CHROM'])
         pos: int = int(row['POS'])  # 1-based position
@@ -166,7 +170,7 @@ def vcf2df(vcf_path:str, prefix:bool, liftOver:bool, fasta: Fasta) -> pd.DataFra
 
     # LiftOver coordinates if the original VCF is in hg38
     if liftOver:
-        vcf = hg38tohg19(vcf, fasta)
+        vcf = hg38tohg19(vcf, fasta, prefix)
 
     # Select chromosomes
     chr_list: list
