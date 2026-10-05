@@ -1,4 +1,6 @@
 import os
+import io
+import gzip
 from pathlib import Path
 import re
 import pickle
@@ -157,14 +159,14 @@ def process_tnp(vcf:pd.DataFrame) -> pd.DataFrame:
 
     return(new_vcf.reset_index(drop=True))
 
-def vcf2df(vcf_path:str, prefix:bool, liftOver:bool, fasta: Fasta) -> pd.DataFrame:
+def vcf2df(io_vcf:io.BytesIO, prefix:bool, liftOver:bool, fasta: Fasta) -> pd.DataFrame:
 
     """
     Filter SNVs in chr1-chr22 from VCF file and return a dataframe
     """
 
     # Open VCF
-    vcf:pd.DataFrame = allel.vcf_to_dataframe(vcf_path, fields='*', alt_number=1)
+    vcf:pd.DataFrame = allel.vcf_to_dataframe(io_vcf, fields='*', alt_number=1)
     vcf.drop_duplicates(inplace=True)
     vcf.reset_index(drop=True, inplace=True)
 
@@ -321,20 +323,45 @@ def df2mut(df:pd.DataFrame, sample_name:str, fasta:Fasta) -> pd.DataFrame:
 
     return(mutations)
 
-def vcf2input(vcf:str, refGenome:str, liftOver:bool) -> pd.DataFrame:
+def vcf2input(vcf_path:str, refGenome:str, liftOver:bool) -> pd.DataFrame:
 
     """
     Process the VCF to get the input necessary for DeepTumour
     """
+    def transform_vcf_filter_field(vcf_path:str) -> io.BytesIO:
+        opener = gzip.open if str(vcf_path).endswith(".gz") else open
+        output:io.BytesIO = io.BytesIO()
+
+        with opener(vcf_path, "rt") as f:
+            for line in f:
+                if line.startswith("##"):
+                    output.write(line.encode())
+                    continue
+
+                if line.startswith("#"):
+                    vcf_header:list = line.rstrip("\n").split("\t")
+                    filter_idx:int = vcf_header.index("FILTER")
+                    output.write(line.encode())
+                    continue
+
+                fields = line.rstrip("\n").split("\t")
+                if fields[filter_idx] == ".":
+                    fields[filter_idx] = "PASS"
+
+                output.write(("\t".join(fields) + "\n").encode())
+
+        output.seek(0)
+        return output
 
     # Create output name
-    sample_name:str = os.path.basename(vcf).replace('.vcf', '')
+    sample_name:str = os.path.basename(vcf_path).replace('.vcf', '')
 
     # Load the reference genome
     fasta:Fasta = Fasta(refGenome)
     prefix:bool = list(fasta.keys())[0].startswith('chr')
 
     # Load the VCF
+    vcf:io.BytesIO = transform_vcf_filter_field(vcf_path)
     df:pd.DataFrame = vcf2df(vcf, prefix, liftOver, fasta)
 
     # Convert the dataframe to bin counts
